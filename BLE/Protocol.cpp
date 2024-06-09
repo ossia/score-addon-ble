@@ -116,6 +116,13 @@ void ble_protocol::scan_services()
       }
     }
   }
+  for(auto [id, data] : m_peripheral.manufacturer_data())
+  {
+    auto& data_node
+        = ossia::net::find_or_create_node(m_device->get_root_node(), std::to_string(id));
+    auto param = data_node.create_parameter(ossia::val_type::STRING);
+    param->set_value(data);
+  }
 }
 
 void ble_protocol::set_device(net::device_base& dev)
@@ -242,6 +249,12 @@ void ble_scan_protocol::scan_services()
           prp_node, name_or_uuid(service_names, service.uuid()));
       auto param = svc_node.create_parameter(ossia::val_type::STRING);
       param->set_value(service.data());
+    }
+    for(auto [id, data] : m_peripheral.manufacturer_data())
+    {
+      auto& data_node = ossia::net::find_or_create_node(prp_node, std::to_string(id));
+      auto param = data_node.create_parameter(ossia::val_type::STRING);
+      param->set_value(data);
     }
   }
 }
