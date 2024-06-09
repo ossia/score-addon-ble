@@ -8,6 +8,10 @@ project(score_addon_ble LANGUAGES CXX)
 score_common_setup()
 
 include(ble.cmake)
+if(NOT TARGET simpleble)
+  return()
+endif()
+
 # Necessary as SimpleBLE overwrites:
 include(GenerateStaticExport)
 
