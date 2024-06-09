@@ -8,6 +8,8 @@ project(score_addon_ble LANGUAGES CXX)
 score_common_setup()
 
 include(ble.cmake)
+# Necessary as SimpleBLE overwrites:
+include(GenerateStaticExport)
 
 add_library(score_addon_ble
     "${CMAKE_CURRENT_SOURCE_DIR}/score_addon_ble.hpp"

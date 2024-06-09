@@ -40,7 +40,6 @@ foreach(IDX RANGE ${BLE_SERVICE_COUNT})
     string(JSON BLE_SERVICE_UUID GET "${BLE_SERVICE_UUIDS}" "${IDX}" uuid)
 
     ble_reformat_uuid(BLE_SERVICE_UUID)
-    message("${BLE_SERVICE_NAME}:${BLE_SERVICE_UUID}:")
     string(APPEND BLE_SERVICE_ARRAY "ble_services_table[\"${BLE_SERVICE_UUID}\"] = \"${BLE_SERVICE_NAME}\";\n")
 endforeach()
 
@@ -54,7 +53,6 @@ foreach(IDX RANGE ${BLE_CHAR_COUNT})
     string(JSON BLE_CHAR_UUID GET "${BLE_CHAR_UUIDS}" "${IDX}" uuid)
 
     ble_reformat_uuid(BLE_CHAR_UUID)
-    message("${BLE_CHAR_NAME}:${BLE_CHAR_UUID}:")
     string(APPEND BLE_CHAR_ARRAY "ble_characteristic_table[\"${BLE_CHAR_UUID}\"] = \"${BLE_CHAR_NAME}\";\n")
 endforeach()
 
@@ -68,7 +66,6 @@ foreach(IDX RANGE ${BLE_DESC_COUNT})
     string(JSON BLE_DESC_UUID GET "${BLE_DESC_UUIDS}" "${IDX}" uuid)
 
     ble_reformat_uuid(BLE_DESC_UUID)
-    message("${BLE_DESC_NAME}:${BLE_DESC_UUID}:")
     string(APPEND BLE_DESC_ARRAY "ble_descriptor_table[\"${BLE_DESC_UUID}\"] = \"${BLE_DESC_NAME}\";\n")
 endforeach()
 
