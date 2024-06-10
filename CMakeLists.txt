@@ -4,6 +4,10 @@ if(NOT TARGET score_lib_base)
     include(ScoreExternalAddon)
 endif()
 
+if(WIN32 AND NOT MSVC)
+    # currently broken as clang doesn't like cppwinrt headers...
+    return()
+endif()
 project(score_addon_ble LANGUAGES CXX)
 score_common_setup()
 
