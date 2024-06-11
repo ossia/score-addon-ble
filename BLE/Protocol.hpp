@@ -3,6 +3,8 @@
 #include <ossia/network/context.hpp>
 #include <ossia/network/context_functions.hpp>
 
+#include <boost/container/flat_map.hpp>
+
 #include <simpleble/SimpleBLE.h>
 
 namespace ossia::net
