@@ -133,12 +133,13 @@ void ble_protocol::set_device(net::device_base& dev)
 
 ble_protocol::~ble_protocol()
 {
-  if(m_peripheral.initialized())
-    if(m_peripheral.is_connected())
-      m_peripheral.disconnect();
   if(m_adapter.initialized())
     if(m_adapter.scan_is_active())
       m_adapter.scan_stop();
+
+  if(m_peripheral.initialized())
+    if(m_peripheral.is_connected())
+      m_peripheral.disconnect();
 }
 
 bool ble_protocol::pull(ossia::net::parameter_base&)
