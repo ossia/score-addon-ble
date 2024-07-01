@@ -1,24 +1,8 @@
 set(LIBFMT_VENDORIZE OFF)
 set(SIMPLEBLE_INSTALL OFF)
-FetchContent_Declare(
-  SimpleBLE
-  GIT_REPOSITORY "https://github.com/jcelerier/SimpleBLE"
-  GIT_TAG        fix/cmake-usage-install-rules
-  GIT_PROGRESS   true
-  SOURCE_SUBDIR  simpleble
-)
+add_subdirectory(3rdparty/SimpleBLE/simpleble "${CMAKE_BINARY_DIR}/simpleble-build")
 
-FetchContent_MakeAvailable(SimpleBLE)
-
-
-FetchContent_Declare(
-  ble-database
-  GIT_REPOSITORY "https://github.com/NordicSemiconductor/bluetooth-numbers-database/"
-  GIT_TAG        master
-  GIT_PROGRESS   true
-)
-
-FetchContent_MakeAvailable(ble-database)
+set(ble-database_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/bluetooth-numbers-database/")
 
 set(BLE_SERVICE_UUIDS_JSON "${ble-database_SOURCE_DIR}/v1/service_uuids.json")
 file(READ "${BLE_SERVICE_UUIDS_JSON}" BLE_SERVICE_UUIDS)

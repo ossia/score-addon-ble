@@ -1,3 +1,9 @@
 [submodule "3rdparty/ultraleap"]
 	path = 3rdparty/ultraleap
 	url = https://github.com/celtera/ultraleap
+[submodule "3rdparty/SimpleBLE"]
+	path = 3rdparty/SimpleBLE
+	url = https://github.com/jcelerier/SimpleBLE
+[submodule "3rdparty/bluetooth-numbers-database"]
+	path = 3rdparty/bluetooth-numbers-database
+	url = https://github.com/NordicSemiconductor/bluetooth-numbers-database/
