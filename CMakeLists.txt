@@ -4,12 +4,23 @@ if(NOT TARGET score_lib_base)
     include(ScoreExternalAddon)
 endif()
 
-if(WIN32 AND NOT MSVC)
-    # currently broken as clang doesn't like cppwinrt headers...
-    return()
-endif()
 project(score_addon_ble LANGUAGES CXX)
 score_common_setup()
+
+if(WIN32 AND NOT MSVC)
+  if(OSSIA_SDK)
+    # For cppwinrt headers that simpleble requires on windows.
+    if(EXISTS "${OSSIA_SDK}/sysroot/include/winrt")
+      include_directories("${OSSIA_SDK}/sysroot/include")
+    else()
+      find_path(WINRT_FOUNDATION_H_PATH winrt/Windows.Foundation.h)
+      if(NOT WINRT_FOUNDATION_H_PATH)
+        return()
+      endif()
+      include_directories("${WINRT_FOUNDATION_H_PATH}")
+    endif()
+  endif()
+endif()
 
 include(ble.cmake)
 if(NOT TARGET simpleble)
