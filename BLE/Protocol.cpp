@@ -1,4 +1,6 @@
 #include "Protocol.hpp"
+#include "ossia/network/base/node.hpp"
+#include "ossia/network/base/node_functions.hpp"
 
 #include <ossia/detail/config.hpp>
 
@@ -10,12 +12,133 @@
 #include <ossia/network/context.hpp>
 
 #include <simpleble/SimpleBLE.h>
+#include <string>
+
 namespace ossia
 {
 using ble_map_type = ossia::case_insensitive_string_map<std::string>;
 const ble_map_type& ble_service_map();
 const ble_map_type& ble_characteristic_map();
 const ble_map_type& ble_descriptor_map();
+
+void expose_manufacturer_data_as_ossia_nodes(
+    ossia::net::node_base& device_node,
+    const std::map<uint16_t, SimpleBLE::ByteArray>& manufacturer_data)
+{
+  for(auto [id, data] : manufacturer_data)
+  {
+    bool got_good_cbor = false;
+    // If the id is the special BLE CBOR id, we have a special advertisement containing CBOR data
+    if(id == ossia::special_ble_cbor_id)
+    {
+      // Try to parse the CBOR and expose the data found as a side effect
+      got_good_cbor = ossia::expose_cbor_as_ossia_nodes(device_node, data);
+    }
+    // If we didn't get good CBOR, expose the raw data as bytes in addition to whatever good data we had found during
+    // CBOR parsing
+    if(!got_good_cbor)
+    {
+      ossia::net::node_base& data_node
+          = ossia::net::find_or_create_node(device_node, std::to_string(id));
+      auto param = data_node.create_parameter(ossia::val_type::STRING);
+      param->set_value(data);
+    }
+  }
+}
+
+bool expose_cbor_as_ossia_nodes(ossia::net::node_base& device_node, const SimpleBLE::ByteArray& cbor_data)
+{
+  QCborStreamReader reader;
+  reader.addData(cbor_data.data(), cbor_data.size());
+  if(!reader.isMap())
+  {
+    // Right now, we only support non nested CBOR maps. Anything else would be kind of a waste of the precious 27 bytes of data
+    // BLE adverts can give us anyways...
+    return false;
+  }
+  reader.enterContainer();
+  while (reader.lastError() == QCborError::NoError && reader.hasNext()) {
+    // This only supports string keys. It will simply giveup if you give it a map with silly keys like
+    // a CBOR flag or a float.
+    std::string key;
+    if(reader.isString())
+    {
+      key = read_next_cbor_string(reader).toStdString();
+    }
+    else
+    {
+      // Skip the entire pair if the key is not a string
+      reader.next();
+      reader.next();
+      continue;
+    }
+    ossia::net::node_base& data_node
+          = ossia::net::find_or_create_node(device_node, key);
+    // gets the value. Only supports string, int, float and double.
+    if(reader.isBool())
+    {
+      auto param = data_node.create_parameter(ossia::val_type::BOOL);
+      param->set_value(reader.toBool());
+      reader.next();
+    }
+    else if(reader.isString())
+    {
+      std::string val = read_next_cbor_string(reader).toStdString();
+      auto param = data_node.create_parameter(ossia::val_type::STRING);
+      param->set_value(val);
+    }
+    else if(reader.isInteger())
+    {
+      auto param = data_node.create_parameter(ossia::val_type::INT);
+      // This will overflow if the cbor encoded a very large int.
+      param->set_value(static_cast<int>(reader.toInteger()));
+      reader.next();
+    }
+    else if(reader.isFloat())
+    {
+      auto param = data_node.create_parameter(ossia::val_type::FLOAT);
+      param->set_value(reader.toFloat());
+      reader.next();
+    }
+    else if(reader.isDouble())
+    {
+      auto param = data_node.create_parameter(ossia::val_type::FLOAT);
+      param->set_value(static_cast<float>(reader.toDouble()));
+      reader.next();
+    }
+    else
+    {
+      // anything else we just ignore and skip over.
+      reader.next();
+    }
+  }
+  if(reader.lastError() == QCborError::NoError)
+  {
+    reader.leaveContainer();
+    return true;
+  }
+  return false;
+}
+
+QString read_next_cbor_string(QCborStreamReader &reader)
+{
+  QString result;
+  if(!reader.isString())
+  {
+    return result;
+  }
+  auto r = reader.readString();
+  while (r.status == QCborStreamReader::Ok) {
+    result += r.data;
+    r = reader.readString();
+  }
+
+  if (r.status == QCborStreamReader::Error) {
+    // handle error condition
+    result.clear();
+  }
+  return result;
+}
 
 // FIXME the addresses that are created on the fly maybe won't work
 // if one does --auto-play
@@ -116,13 +239,7 @@ void ble_protocol::scan_services()
       }
     }
   }
-  for(auto [id, data] : m_peripheral.manufacturer_data())
-  {
-    auto& data_node
-        = ossia::net::find_or_create_node(m_device->get_root_node(), std::to_string(id));
-    auto param = data_node.create_parameter(ossia::val_type::STRING);
-    param->set_value(data);
-  }
+  ossia::expose_manufacturer_data_as_ossia_nodes(m_device->get_root_node(), m_peripheral.manufacturer_data());
 }
 
 void ble_protocol::set_device(net::device_base& dev)
@@ -251,12 +368,7 @@ void ble_scan_protocol::scan_services()
       auto param = svc_node.create_parameter(ossia::val_type::STRING);
       param->set_value(service.data());
     }
-    for(auto [id, data] : m_peripheral.manufacturer_data())
-    {
-      auto& data_node = ossia::net::find_or_create_node(prp_node, std::to_string(id));
-      auto param = data_node.create_parameter(ossia::val_type::STRING);
-      param->set_value(data);
-    }
+    ossia::expose_manufacturer_data_as_ossia_nodes(prp_node, m_peripheral.manufacturer_data());
   }
 }
 
