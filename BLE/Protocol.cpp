@@ -1,6 +1,7 @@
 #include "Protocol.hpp"
-#include "ossia/network/base/node.hpp"
-#include "ossia/network/base/node_functions.hpp"
+
+#include <ossia/network/base/node.hpp>
+#include <ossia/network/base/node_functions.hpp>
 
 #include <ossia/detail/config.hpp>
 
@@ -25,7 +26,7 @@ void expose_manufacturer_data_as_ossia_nodes(
     ossia::net::node_base& device_node,
     const std::map<uint16_t, SimpleBLE::ByteArray>& manufacturer_data)
 {
-  for(auto [id, data] : manufacturer_data)
+  for(const auto& [id, data] : manufacturer_data)
   {
     bool got_good_cbor = false;
     // If the id is the special BLE CBOR id, we have a special advertisement containing CBOR data
