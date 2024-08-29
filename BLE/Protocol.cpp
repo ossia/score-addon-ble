@@ -360,6 +360,7 @@ void ble_scan_protocol::scan_services()
     std::string periph_name = m_peripheral.identifier().empty()
                                   ? m_peripheral.address()
                                   : m_peripheral.identifier();
+    ossia::net::sanitize_name(periph_name);
     auto& prp_node
         = ossia::net::find_or_create_node(m_device->get_root_node(), periph_name);
     for(auto& service : m_peripheral.services())
