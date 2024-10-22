@@ -38,7 +38,14 @@ public:
       }
     });
     adapter.set_callback_on_scan_updated([](SimpleBLE::Peripheral) {});
-    adapter.scan_start();
+    try
+    {
+      adapter.scan_start();
+    }
+    catch(const std::exception& e)
+    {
+      qDebug() << "Error while initiating BLE scan:" << e.what();
+    }
   }
 
   ~BLEEnumerator()
