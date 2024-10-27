@@ -1,6 +1,6 @@
 set(LIBFMT_VENDORIZE OFF)
 set(SIMPLEBLE_INSTALL OFF)
-add_subdirectory(3rdparty/SimpleBLE/simpleble "${CMAKE_BINARY_DIR}/simpleble-build")
+add_subdirectory(3rdparty/SimpleBLE/simpleble "${CMAKE_BINARY_DIR}/simpleble-build" SYSTEM)
 
 set(ble-database_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/bluetooth-numbers-database/")
 
