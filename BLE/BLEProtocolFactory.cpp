@@ -8,6 +8,7 @@
 #include <Explorer/DocumentPlugin/DeviceDocumentPlugin.hpp>
 
 #include <QObject>
+#include <QUrl>
 
 #include <simpleble/SimpleBLE.h>
 
@@ -97,6 +98,11 @@ QString BLEProtocolFactory::prettyName() const noexcept
 QString BLEProtocolFactory::category() const noexcept
 {
   return StandardCategories::hardware;
+}
+
+QUrl BLEProtocolFactory::manual() const noexcept
+{
+  return QUrl("https://ossia.io/score-docs/devices/ble-device.html");
 }
 
 Device::DeviceEnumerators
