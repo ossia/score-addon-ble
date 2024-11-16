@@ -1,7 +1,14 @@
 set(LIBFMT_VENDORIZE OFF)
 set(SIMPLEBLE_INSTALL OFF)
-add_subdirectory(3rdparty/SimpleBLE/simpleble "${CMAKE_BINARY_DIR}/simpleble-build" SYSTEM)
 
+block()
+  if(MSVC)
+    add_compile_options("/w")
+  else()
+    add_compile_options("-w")
+  endif()
+  add_subdirectory(3rdparty/SimpleBLE/simpleble "${CMAKE_BINARY_DIR}/simpleble-build" SYSTEM)
+endblock()
 set(ble-database_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/bluetooth-numbers-database/")
 
 set(BLE_SERVICE_UUIDS_JSON "${ble-database_SOURCE_DIR}/v1/service_uuids.json")
