@@ -19,9 +19,17 @@ score_addon_ble::~score_addon_ble() { }
 std::vector<score::InterfaceBase*> score_addon_ble::factories(
     const score::ApplicationContext& ctx, const score::InterfaceKey& key) const
 {
-  return instantiate_factories<
-      score::ApplicationContext,
-      FW<Device::ProtocolFactory, Protocols::BLEProtocolFactory>>(ctx, key);
+  try
+  {
+    SimpleBLE::Adapter::bluetooth_enabled();
+    return instantiate_factories<
+        score::ApplicationContext,
+        FW<Device::ProtocolFactory, Protocols::BLEProtocolFactory>>(ctx, key);
+  }
+  catch(...)
+  {
+    return {};
+  }
 }
 
 #include <score/plugins/PluginInstances.hpp>
