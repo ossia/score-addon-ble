@@ -3,6 +3,7 @@
 #include <score/plugins/FactorySetup.hpp>
 #include <score/widgets/MessageBox.hpp>
 
+#include <QFileInfo>
 #include <QTimer>
 
 #include <BLE/BLEProtocolFactory.hpp>
@@ -19,6 +20,11 @@ score_addon_ble::~score_addon_ble() { }
 std::vector<score::InterfaceBase*> score_addon_ble::factories(
     const score::ApplicationContext& ctx, const score::InterfaceKey& key) const
 {
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__EMSCRIPTEN__)
+  if(!QFileInfo::exists("/sys/class") || !QFileInfo::exists("/sys/class/bluetooth"))
+    return {};
+#endif
+
   try
   {
     SimpleBLE::Adapter::bluetooth_enabled();
