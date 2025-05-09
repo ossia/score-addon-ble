@@ -72,10 +72,18 @@ private:
   boost::container::flat_map<const ossia::net::parameter_base*, ble_param_id> m_params;
 };
 
+struct ble_scan_configuration
+{
+  std::string adapter; // uuid
+  std::vector<std::string> filter_include;
+  std::vector<std::string> filter_exclude;
+};
+
 class OSSIA_EXPORT ble_scan_protocol final : public ossia::net::protocol_base
 {
 public:
-  explicit ble_scan_protocol(ossia::net::network_context_ptr, std::string_view adapter);
+  explicit ble_scan_protocol(
+      ossia::net::network_context_ptr, ble_scan_configuration conf);
   ~ble_scan_protocol();
 
 private:
@@ -87,11 +95,14 @@ private:
   bool update(net::node_base& node_base) override;
 
   void scan_services();
+  void apply_filters(std::vector<SimpleBLE::Service>& services) const noexcept;
 
   SimpleBLE::Adapter m_adapter;
 
   ossia::net::device_base* m_device{};
   ossia::net::network_context_ptr m_context;
   ossia::net::strand_type m_strand;
+
+  ble_scan_configuration m_conf;
 };
 }

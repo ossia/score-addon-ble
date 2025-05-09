@@ -6,7 +6,6 @@ namespace Protocols
 
 class BLEDevice final : public Device::OwningDeviceInterface
 {
-
   W_OBJECT(BLEDevice)
 public:
   BLEDevice(
@@ -20,5 +19,4 @@ public:
 private:
   const ossia::net::network_context_ptr& m_ctx;
 };
-
 }

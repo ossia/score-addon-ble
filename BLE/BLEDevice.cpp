@@ -42,9 +42,19 @@ bool BLEDevice::reconnect()
   {
     const auto& stgs = settings().deviceSpecificSettings.value<BLESpecificSettings>();
     if(stgs.serial.isEmpty())
+    {
+      ossia::ble_scan_configuration conf;
+      conf.adapter = stgs.adapter.toStdString();
+      auto inc = stgs.include_filters.split(",", Qt::SkipEmptyParts);
+      auto exc = stgs.exclude_filters.split(",", Qt::SkipEmptyParts);
+      for(const auto& e : inc)
+        conf.filter_include.push_back(e.toStdString());
+      for(const auto& e : exc)
+        conf.filter_exclude.push_back(e.toStdString());
       m_dev = std::make_unique<ossia::net::generic_device>(
-          std::make_unique<ossia::ble_scan_protocol>(m_ctx, stgs.adapter.toStdString()),
+          std::make_unique<ossia::ble_scan_protocol>(m_ctx, conf),
           settings().name.toStdString());
+    }
     else
       m_dev = std::make_unique<ossia::net::generic_device>(
           std::make_unique<ossia::ble_protocol>(

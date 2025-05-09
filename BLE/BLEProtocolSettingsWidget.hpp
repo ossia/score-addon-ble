@@ -21,6 +21,8 @@ public:
 
 protected:
   QLineEdit* m_deviceNameEdit{};
+  QLineEdit* m_include{};
+  QLineEdit* m_exclude{};
   Device::DeviceSettings m_settings;
 };
 

@@ -223,7 +223,12 @@ void ble_protocol::scan_services()
       auto param = chara_node.create_parameter(ossia::val_type::STRING);
       if(characteristic.can_read())
       {
-        param->set_value(m_peripheral.read(service.uuid(), characteristic.uuid()));
+        try {
+          auto val = m_peripheral.read(service.uuid(), characteristic.uuid());
+          param->set_value(val);
+        } catch(...) {
+
+        }
       }
 
       if(characteristic.can_write_request() || characteristic.can_write_command()
@@ -234,9 +239,13 @@ void ble_protocol::scan_services()
 
       if(characteristic.can_notify())
       {
+        try {
         m_peripheral.notify(
             service.uuid(), characteristic.uuid(),
             [=](const SimpleBLE::ByteArray& arr) mutable { param->set_value(arr); });
+        } catch(...) {
+
+        }
       }
     }
   }
@@ -304,10 +313,11 @@ bool ble_protocol::update(ossia::net::node_base& node_base)
 // FIXME the addresses that are created on the fly maybe won't work
 // if one does --auto-play
 ble_scan_protocol::ble_scan_protocol(
-    ossia::net::network_context_ptr ptr, std::string_view adapter_uuid)
+    ossia::net::network_context_ptr ptr, ble_scan_configuration conf)
     : protocol_base{flags{SupportsMultiplex}}
     , m_context{ptr}
     , m_strand{boost::asio::make_strand(m_context->context)}
+    , m_conf{std::move(conf)}
 {
   // First look for the correct adapter, or take the first one if
   // the exact one cannot be found
@@ -316,7 +326,7 @@ ble_scan_protocol::ble_scan_protocol(
     return;
   for(auto& adapter : adapters)
   {
-    if(adapter_uuid == adapter.address())
+    if(conf.adapter == adapter.address())
     {
       m_adapter = adapter;
       break;
@@ -339,6 +349,15 @@ ble_scan_protocol::ble_scan_protocol(
   }
 }
 
+static auto name_or_uuid(const ble_map_type& map, const std::string& uuid)
+    -> const std::string&
+{
+  if(auto it = map.find(uuid); it != map.end())
+    return it->second;
+  else
+    return uuid;
+}
+
 void ble_scan_protocol::scan_services()
 {
   if(!m_device)
@@ -347,16 +366,13 @@ void ble_scan_protocol::scan_services()
   auto& char_names = ble_characteristic_map();
   auto& desc_names = ble_descriptor_map();
 
-  auto name_or_uuid
-      = [&](const ble_map_type& map, const std::string& uuid) -> const std::string& {
-    if(auto it = map.find(uuid); it != map.end())
-      return it->second;
-    else
-      return uuid;
-  };
-
   for(auto& m_peripheral : m_adapter.scan_get_results())
   {
+    auto services = m_peripheral.services();
+    apply_filters(services);
+    if(services.empty())
+      continue;
+
     std::string periph_name = m_peripheral.identifier().empty()
                                   ? m_peripheral.address()
                                   : m_peripheral.identifier();
@@ -368,9 +384,64 @@ void ble_scan_protocol::scan_services()
       auto& svc_node = ossia::net::find_or_create_node(
           prp_node, name_or_uuid(service_names, service.uuid()));
       auto param = svc_node.create_parameter(ossia::val_type::STRING);
+
       param->set_value(service.data());
     }
     ossia::expose_manufacturer_data_as_ossia_nodes(prp_node, m_peripheral.manufacturer_data());
+  }
+}
+
+void ble_scan_protocol::apply_filters(
+    std::vector<SimpleBLE::Service>& services) const noexcept
+{
+  auto& service_names = ble_service_map();
+
+  // 1. Filter out the excluded ones
+  if(!this->m_conf.filter_exclude.empty())
+  {
+    for(auto it = services.begin(); it != services.end();)
+    {
+      auto& service = *it;
+      if(ossia::contains(this->m_conf.filter_exclude, service.uuid()))
+      {
+        it = services.erase(it);
+        continue;
+      }
+      else if(auto pretty_name_it = service_names.find(service.uuid());
+              pretty_name_it != service_names.end())
+      {
+        if(ossia::contains(this->m_conf.filter_exclude, pretty_name_it->second))
+        {
+          it = services.erase(it);
+          continue;
+        }
+      }
+      ++it;
+    }
+  }
+
+  // 2. Filter out the ones not in the include list
+  if(!this->m_conf.filter_include.empty())
+  {
+    for(auto it = services.begin(); it != services.end();)
+    {
+      auto& service = *it;
+      if(!ossia::contains(this->m_conf.filter_include, service.uuid()))
+      {
+        it = services.erase(it);
+        continue;
+      }
+      else if(auto pretty_name_it = service_names.find(service.uuid());
+              pretty_name_it != service_names.end())
+      {
+        if(!ossia::contains(this->m_conf.filter_exclude, pretty_name_it->second))
+        {
+          it = services.erase(it);
+          continue;
+        }
+      }
+      ++it;
+    }
   }
 }
 
@@ -384,6 +455,7 @@ ble_scan_protocol::~ble_scan_protocol()
 {
   if(m_adapter.initialized())
     m_adapter.scan_stop();
+  // FIXME we need to finish the strands before deleting this
 }
 
 bool ble_scan_protocol::pull(ossia::net::parameter_base&)

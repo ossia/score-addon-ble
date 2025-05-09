@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QStringList>
+
 #include <verdigris>
 
 namespace Protocols
@@ -9,6 +11,8 @@ struct BLESpecificSettings
 {
   QString adapter;
   QString serial;
+  QString include_filters;
+  QString exclude_filters;
 };
 
 }

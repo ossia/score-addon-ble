@@ -17,6 +17,16 @@ namespace Protocols
 struct BLEAdapters : std::enable_shared_from_this<BLEAdapters>
 {
   std::vector<SimpleBLE::Adapter> list = SimpleBLE::Adapter::get_adapters();
+  ~BLEAdapters()
+  {
+    try {
+      while(!list.empty()) {
+        auto back = list.back();
+        list.pop_back();
+      }
+    }
+    catch(...){}
+  }
 };
 
 class BLEEnumerator final : public Device::DeviceEnumerator
@@ -56,9 +66,21 @@ public:
   }
 
 private:
-  void enumerate(
-      std::function<void(const QString&, const Device::DeviceSettings&)>) const override
+  void enumerate(std::function<void(const QString&, const Device::DeviceSettings&)> f)
+      const override
   {
+    using namespace std::literals;
+
+    Device::DeviceSettings set;
+    BLESpecificSettings sub;
+    sub.adapter = QString::fromStdString(adapter.address());
+
+    set.name = "Advertisements";
+
+    set.protocol = BLEProtocolFactory::static_concreteKey();
+    set.deviceSpecificSettings = QVariant::fromValue(std::move(sub));
+
+    f("Advertisements", set);
   }
 
   void addNewDevice(SimpleBLE::Peripheral& p) noexcept
