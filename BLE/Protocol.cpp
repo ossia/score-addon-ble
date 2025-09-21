@@ -366,20 +366,19 @@ void ble_scan_protocol::scan_services()
   auto& char_names = ble_characteristic_map();
   auto& desc_names = ble_descriptor_map();
 
-  for(auto& m_peripheral : m_adapter.scan_get_results())
+  for(auto peripheral : m_adapter.scan_get_results())
   {
-    auto services = m_peripheral.services();
+    auto services = peripheral.services();
     apply_filters(services);
     if(services.empty())
       continue;
 
-    std::string periph_name = m_peripheral.identifier().empty()
-                                  ? m_peripheral.address()
-                                  : m_peripheral.identifier();
+    std::string periph_name = peripheral.identifier().empty() ? peripheral.address()
+                                                              : peripheral.identifier();
     ossia::net::sanitize_name(periph_name);
     auto& prp_node
         = ossia::net::find_or_create_node(m_device->get_root_node(), periph_name);
-    for(auto& service : m_peripheral.services())
+    for(auto& service : peripheral.services())
     {
       auto& svc_node = ossia::net::find_or_create_node(
           prp_node, name_or_uuid(service_names, service.uuid()));
@@ -387,7 +386,8 @@ void ble_scan_protocol::scan_services()
 
       param->set_value(service.data());
     }
-    ossia::expose_manufacturer_data_as_ossia_nodes(prp_node, m_peripheral.manufacturer_data());
+    ossia::expose_manufacturer_data_as_ossia_nodes(
+        prp_node, peripheral.manufacturer_data());
   }
 }
 
