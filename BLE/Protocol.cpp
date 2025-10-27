@@ -12,7 +12,9 @@
 #include <ossia/network/common/complex_type.hpp>
 #include <ossia/network/context.hpp>
 
-#include <simpleble/SimpleBLE.h>
+#include <QBluetoothLocalDevice>
+#include <QBluetoothDeviceInfo>
+#include <QLowEnergyDescriptor>
 #include <string>
 
 namespace ossia
@@ -24,10 +26,13 @@ const ble_map_type& ble_descriptor_map();
 
 void expose_manufacturer_data_as_ossia_nodes(
     ossia::net::node_base& device_node,
-    const std::map<uint16_t, SimpleBLE::ByteArray>& manufacturer_data)
+    const QMultiHash<quint16, QByteArray>& manufacturer_data)
 {
-  for(const auto& [id, data] : manufacturer_data)
+  for(auto it = manufacturer_data.begin(); it != manufacturer_data.end(); ++it)
   {
+    const quint16 id = it.key();
+    const QByteArray& data = it.value();
+
     bool got_good_cbor = false;
     // If the id is the special BLE CBOR id, we have a special advertisement containing CBOR data
     if(id == ossia::special_ble_cbor_id)
@@ -42,15 +47,15 @@ void expose_manufacturer_data_as_ossia_nodes(
       ossia::net::node_base& data_node
           = ossia::net::find_or_create_node(device_node, std::to_string(id));
       auto param = data_node.create_parameter(ossia::val_type::STRING);
-      param->set_value(data);
+      param->set_value(std::string(data.data(), data.size()));
     }
   }
 }
 
-bool expose_cbor_as_ossia_nodes(ossia::net::node_base& device_node, const SimpleBLE::ByteArray& cbor_data)
+bool expose_cbor_as_ossia_nodes(ossia::net::node_base& device_node, const QByteArray& cbor_data)
 {
   QCborStreamReader reader;
-  reader.addData(cbor_data.data(), cbor_data.size());
+  reader.addData(cbor_data);
   if(!reader.isMap())
   {
     // Right now, we only support non nested CBOR maps. Anything else would be kind of a waste of the precious 27 bytes of data
@@ -147,126 +152,237 @@ ble_protocol::ble_protocol(
     ossia::net::network_context_ptr ptr, std::string_view adapter_uuid,
     std::string_view serial)
     : protocol_base{flags{SupportsMultiplex}}
+    , m_targetSerial{QString::fromUtf8(serial.data(), serial.size())}
     , m_context{ptr}
     , m_strand{boost::asio::make_strand(m_context->context)}
 {
   // First look for the correct adapter, or take the first one if
   // the exact one cannot be found
-  auto adapters = SimpleBLE::Adapter::get_adapters();
-  if(adapters.empty())
-    return;
-  for(auto& adapter : adapters)
+  auto adapters = QBluetoothLocalDevice::allDevices();
+  if(!adapters.empty())
   {
-    if(adapter_uuid == adapter.address())
+    bool found = false;
+    QString adapter_str = QString::fromUtf8(adapter_uuid.data(), adapter_uuid.size());
+    for(const auto& adapter : adapters)
     {
-      m_adapter = adapter;
-      break;
+      if(adapter.address().toString() == adapter_str)
+      {
+        m_adapterAddress = adapter.address();
+        found = true;
+        break;
+      }
+    }
+    if(!found)
+      m_adapterAddress = adapters[0].address();
+  }
+
+  // Create discovery agent
+  if(!m_adapterAddress.isNull())
+  {
+    m_discoveryAgent = new QBluetoothDeviceDiscoveryAgent(m_adapterAddress, this);
+    m_discoveryAgent->setLowEnergyDiscoveryTimeout(5000);
+
+    QObject::connect(m_discoveryAgent, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered,
+                     this, &ble_protocol::onDeviceDiscovered);
+    QObject::connect(m_discoveryAgent, &QBluetoothDeviceDiscoveryAgent::deviceUpdated,
+                     this, &ble_protocol::onDeviceUpdated);
+  }
+  else
+  {
+    m_discoveryAgent = new QBluetoothDeviceDiscoveryAgent(this);
+    m_discoveryAgent->setLowEnergyDiscoveryTimeout(5000);
+
+    QObject::connect(m_discoveryAgent, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered,
+                     this, &ble_protocol::onDeviceDiscovered);
+    QObject::connect(m_discoveryAgent, &QBluetoothDeviceDiscoveryAgent::deviceUpdated,
+                     this, &ble_protocol::onDeviceUpdated);
+  }
+}
+
+void ble_protocol::onDeviceDiscovered(const QBluetoothDeviceInfo& info)
+{
+  // Check if this is the device we're looking for
+  if(info.address().toString() == m_targetSerial || info.name() == m_targetSerial
+     || info.deviceUuid().toString(QBluetoothUuid::WithoutBraces) == m_targetSerial)
+  {
+    // Stop discovery
+    if(m_discoveryAgent)
+      m_discoveryAgent->stop();
+
+    // Create controller
+    if(!m_adapterAddress.isNull())
+      m_controller = QLowEnergyController::createCentral(info, m_adapterAddress, this);
+    else
+      m_controller = QLowEnergyController::createCentral(info, this);
+
+    QObject::connect(m_controller, &QLowEnergyController::connected,
+                     this, &ble_protocol::onConnected);
+    QObject::connect(m_controller, &QLowEnergyController::disconnected,
+                     this, &ble_protocol::onDisconnected);
+    QObject::connect(m_controller, &QLowEnergyController::serviceDiscovered,
+                     this, &ble_protocol::onServiceDiscovered);
+    QObject::connect(m_controller, &QLowEnergyController::discoveryFinished,
+                     this, &ble_protocol::onDiscoveryFinished);
+
+    m_controller->connectToDevice();
+  }
+}
+
+void ble_protocol::onDeviceUpdated(const QBluetoothDeviceInfo& info, QBluetoothDeviceInfo::Fields updatedFields)
+{
+  // Could handle manufacturer data updates here if needed
+  if(m_controller && m_controller->state() != QLowEnergyController::ConnectedState)
+  {
+    if(info.address().toString() == m_targetSerial || info.name() == m_targetSerial)
+    {
+      // Expose manufacturer data
+      if(m_device && updatedFields.testFlag(QBluetoothDeviceInfo::Field::ManufacturerData))
+      {
+        expose_manufacturer_data_as_ossia_nodes(m_device->get_root_node(), info.manufacturerData());
+      }
     }
   }
-  if(!m_adapter.initialized())
-    m_adapter = adapters[0];
+}
 
-  if(m_adapter.initialized())
+void ble_protocol::onConnected()
+{
+  if(m_controller)
   {
-    // Setup our callbacks
-    m_adapter.set_callback_on_scan_start([] {});
-    m_adapter.set_callback_on_scan_stop([] {});
-    m_adapter.set_callback_on_scan_found(
-        [this, serial = std::string(serial)](SimpleBLE::Peripheral p) {
-      if(p.address() == serial)
-      {
-        m_peripheral = p;
-        m_peripheral.connect();
-
-        boost::asio::post(m_strand, [this] { scan_services(); });
-      }
-    });
-    m_adapter.set_callback_on_scan_updated(
-        [this, serial = std::string(serial)](SimpleBLE::Peripheral p) {
-      if(p.address() == serial)
-      {
-        if(!p.is_connected())
-          p.connect();
-
-        boost::asio::post(m_strand, [this] { scan_services(); });
-      }
-    });
+    m_controller->discoverServices();
   }
+}
+
+void ble_protocol::onDisconnected()
+{
+  // Could attempt reconnection here
+}
+
+void ble_protocol::onServiceDiscovered(const QBluetoothUuid& service)
+{
+  // Services will be processed in onDiscoveryFinished
+}
+
+void ble_protocol::onDiscoveryFinished()
+{
+  boost::asio::post(m_strand, [this] { scan_services(); });
 }
 
 void ble_protocol::scan_services()
 {
-  if(!m_device)
+  if(!m_device || !m_controller)
     return;
+
   auto& service_names = ble_service_map();
   auto& char_names = ble_characteristic_map();
-  auto& desc_names = ble_descriptor_map();
 
   auto name_or_uuid
-      = [&](const ble_map_type& map, const std::string& uuid) -> const std::string& {
-    if(auto it = map.find(uuid); it != map.end())
+      = [&](const ble_map_type& map, const QString& uuid) -> std::string {
+    std::string uuid_str = uuid.toStdString();
+    if(auto it = map.find(uuid_str); it != map.end())
       return it->second;
     else
-      return uuid;
+      return uuid_str;
   };
-  for(auto& service : m_peripheral.services())
+
+  for(const auto& serviceUuid : m_controller->services())
   {
+    QLowEnergyService* service = m_controller->createServiceObject(serviceUuid, this);
+    if(!service)
+      continue;
+
+    m_services[serviceUuid] = service;
+
     auto& svc_node = ossia::net::find_or_create_node(
-        m_device->get_root_node(), name_or_uuid(service_names, service.uuid()));
-    auto param = svc_node.create_parameter(ossia::val_type::STRING);
-    param->set_value(service.data());
+        m_device->get_root_node(),
+        name_or_uuid(
+            service_names, serviceUuid.toString(QBluetoothUuid::WithoutBraces)));
+    auto svc_param = svc_node.create_parameter(ossia::val_type::STRING);
 
-    for(auto& characteristic : service.characteristics())
-    {
-      auto& chara_node = ossia::net::find_or_create_node(
-          svc_node, name_or_uuid(char_names, characteristic.uuid()));
-      auto param = chara_node.create_parameter(ossia::val_type::STRING);
-      if(characteristic.can_read())
+    // Discover service details
+    QObject::connect(service, &QLowEnergyService::stateChanged,
+                     this, [this, service, svc_param, &char_names](QLowEnergyService::ServiceState newState) {
+      if(newState == QLowEnergyService::RemoteServiceDiscovered)
       {
-        try {
-          auto val = m_peripheral.read(service.uuid(), characteristic.uuid());
-          param->set_value(val);
-        } catch(...) {
+        auto& svc_node = svc_param->get_node();
 
+        for(const auto& characteristic : service->characteristics())
+        {
+          QString char_uuid = characteristic.uuid().toString();
+          auto& chara_node = ossia::net::find_or_create_node(
+              svc_node, [&] {
+                std::string uuid_str = char_uuid.toStdString();
+                if(auto it = char_names.find(uuid_str); it != char_names.end())
+                  return it->second;
+                return uuid_str;
+              }());
+
+          auto param = chara_node.create_parameter(ossia::val_type::STRING);
+
+          // Read characteristic if readable
+          if(characteristic.properties() & QLowEnergyCharacteristic::Read)
+          {
+            QByteArray val = characteristic.value();
+            if(!val.isEmpty())
+              param->set_value(std::string(val.data(), val.size()));
+          }
+
+          // Store for writing
+          if((characteristic.properties() & QLowEnergyCharacteristic::Write)
+             || (characteristic.properties() & QLowEnergyCharacteristic::WriteNoResponse)
+             || (characteristic.properties() & QLowEnergyCharacteristic::WriteSigned)
+             || !characteristic.descriptors().empty())
+          {
+            m_params.emplace(param, ble_param_id{service->serviceUuid(), characteristic});
+          }
+
+          // Setup notifications
+          if(characteristic.properties() & QLowEnergyCharacteristic::Notify)
+          {
+            QObject::connect(service, &QLowEnergyService::characteristicChanged,
+                           this, [param](const QLowEnergyCharacteristic& info, const QByteArray& value) {
+              param->set_value(std::string(value.data(), value.size()));
+            });
+
+            // Enable notifications
+            QLowEnergyDescriptor cccd = characteristic.clientCharacteristicConfiguration();
+            if(cccd.isValid())
+            {
+              service->writeDescriptor(cccd, QLowEnergyCharacteristic::CCCDEnableNotification);
+            }
+          }
         }
       }
+    });
 
-      if(characteristic.can_write_request() || characteristic.can_write_command()
-         || !characteristic.descriptors().empty())
-      {
-        m_params.emplace(param, ble_param_id{service.uuid(), characteristic});
-      }
-
-      if(characteristic.can_notify())
-      {
-        try {
-        m_peripheral.notify(
-            service.uuid(), characteristic.uuid(),
-            [=](const SimpleBLE::ByteArray& arr) mutable { param->set_value(arr); });
-        } catch(...) {
-
-        }
-      }
-    }
+    service->discoverDetails();
   }
-  ossia::expose_manufacturer_data_as_ossia_nodes(m_device->get_root_node(), m_peripheral.manufacturer_data());
 }
 
 void ble_protocol::set_device(net::device_base& dev)
 {
   m_device = &dev;
-  m_adapter.scan_start();
+  if(m_discoveryAgent)
+    m_discoveryAgent->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
 }
 
 ble_protocol::~ble_protocol()
 {
-  if(m_adapter.initialized())
-    if(m_adapter.scan_is_active())
-      m_adapter.scan_stop();
+  if(m_discoveryAgent && m_discoveryAgent->isActive())
+    m_discoveryAgent->stop();
 
-  if(m_peripheral.initialized())
-    if(m_peripheral.is_connected())
-      m_peripheral.disconnect();
+  if(m_controller)
+  {
+    if(m_controller->state() != QLowEnergyController::UnconnectedState)
+      m_controller->disconnectFromDevice();
+  }
+
+  // Clean up services
+  for(auto& [uuid, service] : m_services)
+  {
+    if(service)
+      service->deleteLater();
+  }
+  m_services.clear();
 }
 
 bool ble_protocol::pull(ossia::net::parameter_base&)
@@ -276,20 +392,33 @@ bool ble_protocol::pull(ossia::net::parameter_base&)
 
 bool ble_protocol::push(const ossia::net::parameter_base& p, const ossia::value& v)
 {
-  if(m_peripheral.is_connected())
+  if(m_controller && m_controller->state() == QLowEnergyController::ConnectedState)
   {
     if(auto it = m_params.find(&p); it != m_params.end())
     {
-      auto& [svc, chara] = it->second;
+      auto& [svc_uuid, chara] = it->second;
 
-      if(chara.can_write_request())
-        m_peripheral.write_request(svc, chara.uuid(), ossia::convert<std::string>(v));
-      else if(chara.can_write_command())
-        m_peripheral.write_request(svc, chara.uuid(), ossia::convert<std::string>(v));
+      auto service_it = m_services.find(svc_uuid);
+      if(service_it == m_services.end())
+        return false;
+
+      QLowEnergyService* service = service_it->second;
+      if(!service)
+        return false;
+
+      std::string val_str = ossia::convert<std::string>(v);
+      QByteArray data(val_str.data(), val_str.size());
+
+      if(chara.properties() & QLowEnergyCharacteristic::Write)
+        service->writeCharacteristic(chara, data, QLowEnergyService::WriteWithResponse);
+      else if(chara.properties() & QLowEnergyCharacteristic::WriteNoResponse)
+        service->writeCharacteristic(chara, data, QLowEnergyService::WriteWithoutResponse);
+      else if(chara.properties() & QLowEnergyCharacteristic::WriteSigned)
+        service->writeCharacteristic(chara, data, QLowEnergyService::WriteSigned);
       else if(!chara.descriptors().empty())
-        m_peripheral.write(
-            svc, chara.uuid(), chara.descriptors().front().uuid(),
-            ossia::convert<std::string>(v));
+        service->writeDescriptor(chara.descriptors().first(), data);
+
+      return true;
     }
   }
   return false;
@@ -321,140 +450,161 @@ ble_scan_protocol::ble_scan_protocol(
 {
   // First look for the correct adapter, or take the first one if
   // the exact one cannot be found
-  auto adapters = SimpleBLE::Adapter::get_adapters();
-  if(adapters.empty())
-    return;
-  for(auto& adapter : adapters)
+  auto adapters = QBluetoothLocalDevice::allDevices();
+  if(!adapters.empty())
   {
-    if(conf.adapter == adapter.address())
+    bool found = false;
+    QString adapter_str = QString::fromStdString(m_conf.adapter);
+    for(const auto& adapter : adapters)
     {
-      m_adapter = adapter;
-      break;
+      if(adapter.address().toString() == adapter_str)
+      {
+        m_adapterAddress = adapter.address();
+        found = true;
+        break;
+      }
     }
+    if(!found)
+      m_adapterAddress = adapters[0].address();
   }
-  if(!m_adapter.initialized())
-    m_adapter = adapters[0];
 
-  if(m_adapter.initialized())
+  // Create discovery agent
+  if(!m_adapterAddress.isNull())
+    m_discoveryAgent = new QBluetoothDeviceDiscoveryAgent(m_adapterAddress, this);
+  else
+    m_discoveryAgent = new QBluetoothDeviceDiscoveryAgent(this);
+
+  if(m_discoveryAgent)
   {
-    // Setup our callbacks
-    m_adapter.set_callback_on_scan_start([] {});
-    m_adapter.set_callback_on_scan_stop([] {});
-    m_adapter.set_callback_on_scan_found([this](SimpleBLE::Peripheral p) {
-      boost::asio::post(m_strand, [this] { scan_services(); });
-    });
-    m_adapter.set_callback_on_scan_updated([this](SimpleBLE::Peripheral p) {
-      boost::asio::post(m_strand, [this] { scan_services(); });
-    });
+    m_discoveryAgent->setLowEnergyDiscoveryTimeout(15000);
+
+    QObject::connect(m_discoveryAgent, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered,
+                     this, &ble_scan_protocol::onDeviceDiscovered);
   }
 }
 
-static auto name_or_uuid(const ble_map_type& map, const std::string& uuid)
-    -> const std::string&
+void ble_scan_protocol::onDeviceDiscovered(const QBluetoothDeviceInfo& info)
 {
-  if(auto it = map.find(uuid); it != map.end())
-    return it->second;
-  else
-    return uuid;
+  if(!should_include_device(info))
+    return;
+
+  boost::asio::post(m_strand, [this, info] { scan_services(); });
+}
+
+bool ble_scan_protocol::should_include_device(const QBluetoothDeviceInfo& info) const noexcept
+{
+  auto& service_names = ble_service_map();
+
+  // Get service UUIDs from the device
+  QList<QBluetoothUuid> serviceUuids = info.serviceUuids();
+
+  // If no filters, include all BLE devices
+  if(m_conf.filter_exclude.empty() && m_conf.filter_include.empty())
+    return true;
+
+  // Check exclude filters
+  if(!m_conf.filter_exclude.empty())
+  {
+    for(const auto& service_uuid : serviceUuids)
+    {
+      std::string uuid_str
+          = service_uuid.toString(QBluetoothUuid::WithoutBraces).toStdString();
+      if(ossia::contains(m_conf.filter_exclude, uuid_str))
+        return false;
+
+      // Check pretty name too
+      if(auto it = service_names.find(uuid_str); it != service_names.end())
+      {
+        if(ossia::contains(m_conf.filter_exclude, it->second))
+          return false;
+      }
+    }
+  }
+
+  // Check include filters
+  if(!m_conf.filter_include.empty())
+  {
+    bool found = false;
+    for(const auto& service_uuid : serviceUuids)
+    {
+      std::string uuid_str
+          = service_uuid.toString(QBluetoothUuid::WithoutBraces).toStdString();
+      if(ossia::contains(m_conf.filter_include, uuid_str))
+      {
+        found = true;
+        break;
+      }
+
+      // Check pretty name too
+      if(auto it = service_names.find(uuid_str); it != service_names.end())
+      {
+        if(ossia::contains(m_conf.filter_include, it->second))
+        {
+          found = true;
+          break;
+        }
+      }
+    }
+    return found;
+  }
+
+  return true;
 }
 
 void ble_scan_protocol::scan_services()
 {
-  if(!m_device)
+  if(!m_device || !m_discoveryAgent)
     return;
-  auto& service_names = ble_service_map();
-  auto& char_names = ble_characteristic_map();
-  auto& desc_names = ble_descriptor_map();
 
-  for(auto peripheral : m_adapter.scan_get_results())
+  auto& service_names = ble_service_map();
+
+  for(const auto& deviceInfo : m_discoveryAgent->discoveredDevices())
   {
-    auto services = peripheral.services();
-    apply_filters(services);
-    if(services.empty())
+    if(!should_include_device(deviceInfo))
       continue;
 
-    std::string periph_name = peripheral.identifier().empty() ? peripheral.address()
-                                                              : peripheral.identifier();
-    ossia::net::sanitize_name(periph_name);
+    QString periph_name
+        = deviceInfo.name().isEmpty()
+              ? deviceInfo.address().isNull()
+                    ? deviceInfo.deviceUuid().toString(QBluetoothUuid::WithoutBraces)
+                    : deviceInfo.address().toString()
+              : deviceInfo.name();
+    std::string periph_name_std = periph_name.toStdString();
+    ossia::net::sanitize_name(periph_name_std);
+
     auto& prp_node
-        = ossia::net::find_or_create_node(m_device->get_root_node(), periph_name);
-    for(auto& service : peripheral.services())
+        = ossia::net::find_or_create_node(m_device->get_root_node(), periph_name_std);
+
+    for(const auto& service_uuid : deviceInfo.serviceUuids())
     {
-      auto& svc_node = ossia::net::find_or_create_node(
-          prp_node, name_or_uuid(service_names, service.uuid()));
+      std::string uuid_str
+          = service_uuid.toString(QBluetoothUuid::WithoutBraces).toStdString();
+      std::string node_name;
+      if(auto it = service_names.find(uuid_str); it != service_names.end())
+        node_name = it->second;
+      else
+        node_name = uuid_str;
+
+      auto& svc_node = ossia::net::find_or_create_node(prp_node, node_name);
       auto param = svc_node.create_parameter(ossia::val_type::STRING);
-
-      param->set_value(service.data());
+      param->set_value(uuid_str);
     }
-    ossia::expose_manufacturer_data_as_ossia_nodes(
-        prp_node, peripheral.manufacturer_data());
-  }
-}
 
-void ble_scan_protocol::apply_filters(
-    std::vector<SimpleBLE::Service>& services) const noexcept
-{
-  auto& service_names = ble_service_map();
-
-  // 1. Filter out the excluded ones
-  if(!this->m_conf.filter_exclude.empty())
-  {
-    for(auto it = services.begin(); it != services.end();)
-    {
-      auto& service = *it;
-      if(ossia::contains(this->m_conf.filter_exclude, service.uuid()))
-      {
-        it = services.erase(it);
-        continue;
-      }
-      else if(auto pretty_name_it = service_names.find(service.uuid());
-              pretty_name_it != service_names.end())
-      {
-        if(ossia::contains(this->m_conf.filter_exclude, pretty_name_it->second))
-        {
-          it = services.erase(it);
-          continue;
-        }
-      }
-      ++it;
-    }
-  }
-
-  // 2. Filter out the ones not in the include list
-  if(!this->m_conf.filter_include.empty())
-  {
-    for(auto it = services.begin(); it != services.end();)
-    {
-      auto& service = *it;
-      if(!ossia::contains(this->m_conf.filter_include, service.uuid()))
-      {
-        it = services.erase(it);
-        continue;
-      }
-      else if(auto pretty_name_it = service_names.find(service.uuid());
-              pretty_name_it != service_names.end())
-      {
-        if(!ossia::contains(this->m_conf.filter_exclude, pretty_name_it->second))
-        {
-          it = services.erase(it);
-          continue;
-        }
-      }
-      ++it;
-    }
+    ossia::expose_manufacturer_data_as_ossia_nodes(prp_node, deviceInfo.manufacturerData());
   }
 }
 
 void ble_scan_protocol::set_device(net::device_base& dev)
 {
   m_device = &dev;
-  m_adapter.scan_start();
+  if(m_discoveryAgent)
+    m_discoveryAgent->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
 }
 
 ble_scan_protocol::~ble_scan_protocol()
 {
-  if(m_adapter.initialized())
-    m_adapter.scan_stop();
+  if(m_discoveryAgent && m_discoveryAgent->isActive())
+    m_discoveryAgent->stop();
   // FIXME we need to finish the strands before deleting this
 }
 

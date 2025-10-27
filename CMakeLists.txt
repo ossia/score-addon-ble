@@ -7,28 +7,14 @@ endif()
 project(score_addon_ble LANGUAGES CXX)
 score_common_setup()
 
-if(WIN32 AND NOT MSVC)
-  if(OSSIA_SDK)
-    # For cppwinrt headers that simpleble requires on windows.
-    if(EXISTS "${OSSIA_SDK}/sysroot/include/winrt")
-      include_directories("${OSSIA_SDK}/sysroot/include")
-    else()
-      find_path(WINRT_FOUNDATION_H_PATH winrt/Windows.Foundation.h)
-      if(NOT WINRT_FOUNDATION_H_PATH)
-        return()
-      endif()
-      include_directories("${WINRT_FOUNDATION_H_PATH}")
-    endif()
-  endif()
-endif()
-
-include(ble.cmake)
-if(NOT TARGET simpleble)
+# Find Qt Bluetooth
+find_package(${QT_VERSION} COMPONENTS Bluetooth)
+if(NOT TARGET ${QT_PREFIX}::Bluetooth)
+  message(STATUS "Qt Bluetooth not found, skipping BLE addon")
   return()
 endif()
 
-# Necessary as SimpleBLE overwrites:
-include(GenerateStaticExport)
+include(ble.cmake)
 
 add_library(score_addon_ble
     "${CMAKE_CURRENT_SOURCE_DIR}/score_addon_ble.hpp"
@@ -53,7 +39,7 @@ add_library(score_addon_ble
 target_link_libraries(score_addon_ble
   PUBLIC
     score_plugin_engine
-    simpleble::simpleble
+    ${QT_PREFIX}::Bluetooth Qt6::QDarwinBluetoothPermissionPlugin
 )
 
 setup_score_plugin(score_addon_ble)
