@@ -41,6 +41,7 @@ target_link_libraries(score_addon_ble
     score_plugin_engine
     ${QT_PREFIX}::Bluetooth
     $<$<BOOL:${APPLE}>:${QT_PREFIX}::QDarwinBluetoothPermissionPlugin>
+    $<$<BOOL:${WIN32}>:RuntimeObject>
 )
 
 setup_score_plugin(score_addon_ble)
