@@ -1,12 +1,16 @@
 #pragma once
-#include "simpleble/Types.h"
 #include <ossia/network/base/protocol.hpp>
 #include <ossia/network/context.hpp>
 #include <ossia/network/context_functions.hpp>
 
 #include <boost/container/flat_map.hpp>
 
-#include <simpleble/SimpleBLE.h>
+#include <QBluetoothDeviceDiscoveryAgent>
+#include <QBluetoothLocalDevice>
+#include <QLowEnergyController>
+#include <QLowEnergyService>
+#include <QBluetoothDeviceInfo>
+#include <QByteArray>
 #include <cstdint>
 #include <QCborStreamReader>
 
@@ -26,7 +30,7 @@ constexpr int special_ble_cbor_id = 0xffff;
  * Expose the manufacturer data found in BLE advertisements as child nodes of device_node.
  * This will call expose_cbor_as_ossia_nodes if it detects the special_ble_cbor_id.
  */
-void expose_manufacturer_data_as_ossia_nodes(ossia::net::node_base& device_node, const std::map<uint16_t, SimpleBLE::ByteArray>& manufacturer_data);
+void expose_manufacturer_data_as_ossia_nodes(ossia::net::node_base& device_node, const QMultiHash<quint16, QByteArray>& manufacturer_data);
 
 /**
  * basically qt's CBOR string reading example. could be replaced by a readAllString() call in qt 6.7 but I'm developing with qt 6.2.
@@ -41,9 +45,9 @@ QString read_next_cbor_string(QCborStreamReader& reader);
  *
  * In case of error, this may still expose some of the data if there was valid data to expose.
  */
-bool expose_cbor_as_ossia_nodes(ossia::net::node_base& device_node, const SimpleBLE::ByteArray& cbor_data);
+bool expose_cbor_as_ossia_nodes(ossia::net::node_base& device_node, const QByteArray& cbor_data);
 
-class OSSIA_EXPORT ble_protocol final : public ossia::net::protocol_base
+class OSSIA_EXPORT ble_protocol final : public QObject, public ossia::net::protocol_base
 {
 public:
   explicit ble_protocol(
@@ -60,16 +64,25 @@ private:
   bool update(net::node_base& node_base) override;
 
   void scan_services();
+  void onDeviceDiscovered(const QBluetoothDeviceInfo& info);
+  void onDeviceUpdated(const QBluetoothDeviceInfo& info, QBluetoothDeviceInfo::Fields updatedFields);
+  void onConnected();
+  void onDisconnected();
+  void onServiceDiscovered(const QBluetoothUuid& service);
+  void onDiscoveryFinished();
 
-  SimpleBLE::Adapter m_adapter;
-  SimpleBLE::Peripheral m_peripheral;
+  QBluetoothDeviceDiscoveryAgent* m_discoveryAgent{};
+  QLowEnergyController* m_controller{};
+  QBluetoothAddress m_adapterAddress;
+  QString m_targetSerial;
 
   ossia::net::device_base* m_device{};
   ossia::net::network_context_ptr m_context;
   ossia::net::strand_type m_strand;
 
-  using ble_param_id = std::pair<std::string, SimpleBLE::Characteristic>;
+  using ble_param_id = std::pair<QBluetoothUuid, QLowEnergyCharacteristic>;
   boost::container::flat_map<const ossia::net::parameter_base*, ble_param_id> m_params;
+  boost::container::flat_map<QBluetoothUuid, QLowEnergyService*> m_services;
 };
 
 struct ble_scan_configuration
@@ -79,7 +92,7 @@ struct ble_scan_configuration
   std::vector<std::string> filter_exclude;
 };
 
-class OSSIA_EXPORT ble_scan_protocol final : public ossia::net::protocol_base
+class OSSIA_EXPORT ble_scan_protocol final : public QObject, public ossia::net::protocol_base
 {
 public:
   explicit ble_scan_protocol(
@@ -95,9 +108,11 @@ private:
   bool update(net::node_base& node_base) override;
 
   void scan_services();
-  void apply_filters(std::vector<SimpleBLE::Service>& services) const noexcept;
+  void onDeviceDiscovered(const QBluetoothDeviceInfo& info);
+  bool should_include_device(const QBluetoothDeviceInfo& info) const noexcept;
 
-  SimpleBLE::Adapter m_adapter;
+  QBluetoothDeviceDiscoveryAgent* m_discoveryAgent{};
+  QBluetoothAddress m_adapterAddress;
 
   ossia::net::device_base* m_device{};
   ossia::net::network_context_ptr m_context;
