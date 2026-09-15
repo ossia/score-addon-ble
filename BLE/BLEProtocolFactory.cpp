@@ -7,51 +7,37 @@
 
 #include <Explorer/DocumentPlugin/DeviceDocumentPlugin.hpp>
 
+#include <QBluetoothDeviceDiscoveryAgent>
+#include <QBluetoothDeviceInfo>
+#include <QBluetoothLocalDevice>
+#include <QBluetoothPermission>
 #include <QObject>
 #include <QUrl>
 
-#include <simpleble/SimpleBLE.h>
-
 namespace Protocols
 {
-struct BLEAdapters : std::enable_shared_from_this<BLEAdapters>
-{
-  std::vector<SimpleBLE::Adapter> list = SimpleBLE::Adapter::get_adapters();
-  ~BLEAdapters()
-  {
-    try {
-      while(!list.empty()) {
-        auto back = list.back();
-        list.pop_back();
-      }
-    }
-    catch(...){}
-  }
-};
-
 class BLEEnumerator final : public Device::DeviceEnumerator
 {
 public:
-  std::shared_ptr<BLEAdapters> adapters;
-  SimpleBLE::Adapter& adapter;
-  std::vector<SimpleBLE::Peripheral> peripherals;
-  BLEEnumerator(std::shared_ptr<BLEAdapters> ref, SimpleBLE::Adapter& adapter)
-      : adapters{std::move(ref)}
-      , adapter{adapter}
+  QBluetoothAddress adapter_address;
+  QBluetoothDeviceDiscoveryAgent* discovery_agent{};
+  QList<QBluetoothDeviceInfo> peripherals;
+
+  BLEEnumerator(const QBluetoothAddress& addr)
+      : adapter_address{addr}
   {
-    adapter.set_callback_on_scan_start([]() {});
-    adapter.set_callback_on_scan_stop([]() {});
-    adapter.set_callback_on_scan_found([this](SimpleBLE::Peripheral p) {
-      if(p.initialized())
-      {
-        peripherals.push_back(p);
-        addNewDevice(p);
-      }
+    discovery_agent = new QBluetoothDeviceDiscoveryAgent(adapter_address);
+    discovery_agent->setLowEnergyDiscoveryTimeout(5000);
+
+    QObject::connect(discovery_agent, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered,
+                     [this](const QBluetoothDeviceInfo& info) {
+      peripherals.push_back(info);
+      addNewDevice(info);
     });
-    adapter.set_callback_on_scan_updated([](SimpleBLE::Peripheral) {});
+
     try
     {
-      adapter.scan_start();
+      discovery_agent->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
     }
     catch(const std::exception& e)
     {
@@ -61,8 +47,12 @@ public:
 
   ~BLEEnumerator()
   {
-    if(adapter.initialized() && adapter.scan_is_active())
-      adapter.scan_stop();
+    if(discovery_agent)
+    {
+      if(discovery_agent->isActive())
+        discovery_agent->stop();
+      discovery_agent->deleteLater();
+    }
   }
 
 private:
@@ -73,7 +63,7 @@ private:
 
     Device::DeviceSettings set;
     BLESpecificSettings sub;
-    sub.adapter = QString::fromStdString(adapter.address());
+    sub.adapter = adapter_address.toString();
 
     set.name = "Advertisements";
 
@@ -83,26 +73,29 @@ private:
     f("Advertisements", set);
   }
 
-  void addNewDevice(SimpleBLE::Peripheral& p) noexcept
+  void addNewDevice(const QBluetoothDeviceInfo& p) noexcept
   {
     using namespace std::literals;
 
     Device::DeviceSettings set;
     BLESpecificSettings sub;
-    sub.adapter = QString::fromStdString(adapter.address());
-    sub.serial = QString::fromStdString(p.address());
+    sub.adapter = adapter_address.toString();
+    if(!p.address().isNull())
+      sub.serial = p.address().toString();
+    else
+      sub.serial = p.deviceUuid().toString(QBluetoothUuid::WithoutBraces);
 
     QString pretty_name;
     QString device_name;
-    if(p.identifier().empty())
+    if(p.name().isEmpty())
     {
       pretty_name = sub.serial;
       device_name = sub.serial;
     }
     else
     {
-      pretty_name = QString::fromStdString(p.identifier()) + " (" + sub.serial + ")";
-      device_name = QString::fromStdString(p.identifier());
+      pretty_name = p.name() + " (" + sub.serial + ")";
+      device_name = p.name();
     }
     set.name = device_name;
 
@@ -130,18 +123,15 @@ QUrl BLEProtocolFactory::manual() const noexcept
 Device::DeviceEnumerators
 BLEProtocolFactory::getEnumerators(const score::DocumentContext& ctx) const
 {
-  if(!SimpleBLE::Adapter::bluetooth_enabled())
-    return {};
-
-  auto adapter_list = std::make_shared<BLEAdapters>();
-  if(adapter_list->list.empty())
+  auto adapter_list = QBluetoothLocalDevice::allDevices();
+  if(adapter_list.empty())
     return {};
 
   Device::DeviceEnumerators enums;
-  for(auto& adapter : adapter_list->list)
+  for(const auto& adapter : adapter_list)
     enums.emplace_back(
-        QString::fromStdString(adapter.identifier()),
-        new BLEEnumerator{adapter_list, adapter});
+        adapter.name(),
+        new BLEEnumerator{adapter.address()});
   return enums;
 }
 

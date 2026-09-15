@@ -11,8 +11,7 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QVariant>
-
-#include <simpleble/SimpleBLE.h>
+#include <QBluetoothLocalDevice>
 
 #include <wobjectimpl.h>
 
@@ -42,9 +41,10 @@ BLEProtocolSettingsWidget::BLEProtocolSettingsWidget(QWidget* parent)
   layout->addRow(tr("Name"), m_deviceNameEdit);
   layout->addRow(tr("Include filters"), m_include);
   layout->addRow(tr("Exclude filters"), m_exclude);
+  bool bluetooth_enabled = !QBluetoothLocalDevice::allDevices().isEmpty();
   layout->addRow(new QLabel(
       tr("Bluetooth status: %1")
-          .arg(SimpleBLE::Adapter::bluetooth_enabled() ? "enabled" : "disabled")));
+          .arg(bluetooth_enabled ? "enabled" : "disabled")));
 
   setLayout(layout);
 }
