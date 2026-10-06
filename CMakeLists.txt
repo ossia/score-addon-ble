@@ -56,4 +56,10 @@ target_link_libraries(score_addon_ble
     simpleble::simpleble
 )
 
+if(COMMAND score_register_license)
+  score_register_license(SimpleBLE URL "https://github.com/simpleble/simpleble" FILES "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SimpleBLE/LICENSE.md")
+  score_register_license("Bluetooth Numbers Database" URL "https://github.com/NordicSemiconductor/bluetooth-numbers-database"
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/bluetooth-numbers-database/LICENSE")
+endif()
+
 setup_score_plugin(score_addon_ble)
