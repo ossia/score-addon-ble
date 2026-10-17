@@ -28,7 +28,7 @@ if(NOT TARGET simpleble)
 endif()
 
 # Necessary as SimpleBLE overwrites:
-include(GenerateStaticExport)
+include(GenerateStaticExport OPTIONAL)
 
 add_library(score_addon_ble
     "${CMAKE_CURRENT_SOURCE_DIR}/score_addon_ble.hpp"

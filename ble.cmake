@@ -1,7 +1,15 @@
 set(LIBFMT_VENDORIZE OFF)
 set(SIMPLEBLE_INSTALL OFF)
 
+if(NOT TARGET fmt::fmt-header-only)
+  add_library(fmt::fmt-header-only INTERFACE IMPORTED)
+  target_compile_definitions(fmt::fmt-header-only INTERFACE FMT_HEADER_ONLY=1)
+  target_compile_options(fmt::fmt-header-only INTERFACE $<TARGET_PROPERTY:score_lib_base,INTERFACE_COMPILE_OPTIONS>)
+endif()
+
 block()
+  set(BUILD_SHARED_LIBS OFF)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   if(MSVC)
     add_compile_options("/w")
   else()
