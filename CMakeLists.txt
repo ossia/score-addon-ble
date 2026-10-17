@@ -7,7 +7,7 @@ endif()
 project(score_addon_ble LANGUAGES CXX)
 score_common_setup()
 
-if(WIN32 AND NOT MSVC)
+if(WIN32 AND NOT MSVC AND NOT EXISTS "${SCORE_SDK}/include/winrt/Windows.Foundation.h")
   if(OSSIA_SDK)
     # For cppwinrt headers that simpleble requires on windows.
     if(EXISTS "${OSSIA_SDK}/sysroot/include/winrt")
@@ -28,7 +28,7 @@ if(NOT TARGET simpleble)
 endif()
 
 # Necessary as SimpleBLE overwrites:
-include(GenerateStaticExport)
+include(GenerateStaticExport OPTIONAL)
 
 add_library(score_addon_ble
     "${CMAKE_CURRENT_SOURCE_DIR}/score_addon_ble.hpp"
